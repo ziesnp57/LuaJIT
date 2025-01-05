@@ -18,7 +18,8 @@
   _(repeat) _(return) _(then) _(true) _(until) _(while) \
   __(concat, ..) __(dots, ...) __(eq, ==) __(ge, >=) __(le, <=) __(ne, ~=) \
   __(label, ::) __(number, <number>) __(name, <name>) __(string, <string>) \
-  __(eof, <eof>)
+  __(eof, <eof>) \
+  __(shl, <<) __(shr, >>) __(bor, |) __(band, &)
 
 enum {
   TK_OFS = 256,

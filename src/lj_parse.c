@@ -152,6 +152,10 @@ typedef enum BinOpr {
   OPR_NE, OPR_EQ,
   OPR_LT, OPR_GE, OPR_LE, OPR_GT,
   OPR_AND, OPR_OR,
+  OPR_SHL,  /* 左移 << */
+  OPR_SHR,  /* 右移 >> */
+  OPR_BOR,  /* 按位或 | */
+  OPR_BAND,  /* 按位与 & */
   OPR_NOBINOPR
 } BinOpr;
 
@@ -895,45 +899,83 @@ static void bcemit_binop_left(FuncState *fs, BinOpr op, ExpDesc *e)
   }
 }
 
-/* Emit binary operator. */
-static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
-{
-  if (op <= OPR_POW) {
-    bcemit_arith(fs, op, e1, e2);
-  } else if (op == OPR_AND) {
-    lj_assertFS(e1->t == NO_JMP, "jump list not closed");
-    expr_discharge(fs, e2);
-    jmp_append(fs, &e2->f, e1->f);
-    *e1 = *e2;
-  } else if (op == OPR_OR) {
-    lj_assertFS(e1->f == NO_JMP, "jump list not closed");
-    expr_discharge(fs, e2);
-    jmp_append(fs, &e2->t, e1->t);
-    *e1 = *e2;
-  } else if (op == OPR_CONCAT) {
-    expr_toval(fs, e2);
-    if (e2->k == VRELOCABLE && bc_op(*bcptr(fs, e2)) == BC_CAT) {
-      lj_assertFS(e1->u.s.info == bc_b(*bcptr(fs, e2))-1,
-		  "bad CAT stack layout");
-      expr_free(fs, e1);
-      setbc_b(bcptr(fs, e2), e1->u.s.info);
-      e1->u.s.info = e2->u.s.info;
+
+// 处理二元操作符
+static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2) {
+    if (op <= OPR_POW) {
+        bcemit_arith(fs, op, e1, e2);
+    } else if (op == OPR_BOR) {
+        // 直接计算结果并返回，无需修改字节码
+        if (e1->k == VKNUM && e2->k == VKNUM) {
+            // 按位或操作
+            e1->u.nval.i = e1->u.nval.i | e2->u.nval.i;
+            e1->k = VKNUM; // 设置为数值类型
+        } else {
+            lj_assertFS(0, "unsupported operand type for '|' operator");
+        }
+    } else if (op == OPR_BAND) {
+        // 直接计算结果并返回，无需修改字节码
+        if (e1->k == VKNUM && e2->k == VKNUM) {
+            e1->u.nval.i = e1->u.nval.i & e2->u.nval.i;
+            e1->k = VKNUM; // 设置为数值类型
+        } else {
+            // 原有的字节码生成逻辑
+            lj_assertFS(0, "unsupported operand type for '&' operator");
+        }
+    } else if (op == OPR_SHL) {
+        // 直接计算结果并返回，无需修改字节码
+        if (e1->k == VKNUM && e2->k == VKNUM) {
+            // 按位或操作
+            e1->u.nval.i = e1->u.nval.i << e2->u.nval.i;
+            e1->k = VKNUM; // 设置为数值类型
+        } else {
+            // 原有的字节码生成逻辑
+            lj_assertFS(0, "unsupported operand type for '<<' operator");
+        }
+    } else if (op == OPR_SHR) {
+        // 直接计算结果并返回，无需修改字节码
+        if (e1->k == VKNUM && e2->k == VKNUM) {
+            // 按位或操作
+            e1->u.nval.i = e1->u.nval.i >> e2->u.nval.i;
+            e1->k = VKNUM; // 设置为数值类型
+        } else {
+            // 原有的字节码生成逻辑
+            lj_assertFS(0, "unsupported operand type for '>>' operator");
+        }
+    } else if (op == OPR_AND) {
+        lj_assertFS(e1->t == NO_JMP, "jump list not closed");
+        expr_discharge(fs, e2);
+        jmp_append(fs, &e2->f, e1->f);
+        *e1 = *e2;
+    } else if (op == OPR_OR) {
+        lj_assertFS(e1->f == NO_JMP, "jump list not closed");
+        expr_discharge(fs, e2);
+        jmp_append(fs, &e2->t, e1->t);
+        *e1 = *e2;
+    } else if (op == OPR_CONCAT) {
+        expr_toval(fs, e2);
+        if (e2->k == VRELOCABLE && bc_op(*bcptr(fs, e2)) == BC_CAT) {
+            lj_assertFS(e1->u.s.info == bc_b(*bcptr(fs, e2)) - 1,
+                        "bad CAT stack layout");
+            expr_free(fs, e1);
+            setbc_b(bcptr(fs, e2), e1->u.s.info);
+            e1->u.s.info = e2->u.s.info;
+        } else {
+            expr_tonextreg(fs, e2);
+            expr_free(fs, e2);
+            expr_free(fs, e1);
+            e1->u.s.info = bcemit_ABC(fs, BC_CAT, 0, e1->u.s.info, e2->u.s.info);
+        }
+        e1->k = VRELOCABLE;
     } else {
-      expr_tonextreg(fs, e2);
-      expr_free(fs, e2);
-      expr_free(fs, e1);
-      e1->u.s.info = bcemit_ABC(fs, BC_CAT, 0, e1->u.s.info, e2->u.s.info);
+        lj_assertFS(op == OPR_NE || op == OPR_EQ || op == OPR_LT || op == OPR_GE ||
+                    op == OPR_LE || op == OPR_GT,
+                    "bad binop %d", op);
+        bcemit_comp(fs, op, e1, e2);
     }
-    e1->k = VRELOCABLE;
-  } else {
-    lj_assertFS(op == OPR_NE || op == OPR_EQ ||
-	       op == OPR_LT || op == OPR_GE || op == OPR_LE || op == OPR_GT,
-	       "bad binop %d", op);
-    bcemit_comp(fs, op, e1, e2);
-  }
 }
 
-/* Emit unary operator. */
+//处理一元操作符
 static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
 {
   if (op == BC_NOT) {
@@ -2062,6 +2104,10 @@ static BinOpr token2binop(LexToken tok)
   case '<':	return OPR_LT;
   case TK_le:	return OPR_LE;
   case '>':	return OPR_GT;
+  case TK_shl:	return OPR_SHL;  // 左移
+  case TK_shr:	return OPR_SHR;  // 右移
+  case TK_bor: return OPR_BOR;  // 位或
+  case TK_band: return OPR_BAND;  // 位与
   case TK_ge:	return OPR_GE;
   case TK_and:	return OPR_AND;
   case TK_or:	return OPR_OR;
@@ -2074,11 +2120,13 @@ static const struct {
   uint8_t left;		/* Left priority. */
   uint8_t right;	/* Right priority. */
 } priority[] = {
-  {6,6}, {6,6}, {7,7}, {7,7}, {7,7},	/* ADD SUB MUL DIV MOD */
-  {10,9}, {5,4},			/* POW CONCAT (right associative) */
-  {3,3}, {3,3},				/* EQ NE */
-  {3,3}, {3,3}, {3,3}, {3,3},		/* LT GE GT LE */
-  {2,2}, {1,1}				/* AND OR */
+        {6,6}, {6,6}, {7,7}, {7,7}, {7,7},	/* ADD SUB MUL DIV MOD */
+        {6,6}, {6,6},                         /* SHL SHR (left and right shift) */
+        {10,9}, {5,4},			/* POW CONCAT (right associative) */
+        {5,5}, {4,4},                         /* BOR BAND (bitwise or/and) */
+        {3,3}, {3,3},				/* EQ NE */
+        {3,3}, {3,3}, {3,3}, {3,3},		/* LT GE GT LE */
+        {2,2}, {1,1}				/* AND OR */
 };
 
 #define UNARY_PRIORITY		8  /* Priority for unary operators. */
@@ -2440,7 +2488,8 @@ static void parse_while(LexState *ls, BCLine line)
   start = fs->lasttarget = fs->pc;
   condexit = expr_cond(ls);
   fscope_begin(fs, &bl, FSCOPE_LOOP);
-  lex_check(ls, TK_do);
+  if (ls->tok == TK_do)  /* Optional 'do'. */
+     lj_lex_next(ls);  /* Skip 'do'. */
   loop = bcemit_AD(fs, BC_LOOP, fs->nactvar, 0);
   parse_block(ls);
   jmp_patch(fs, bcemit_jmp(fs), start);
@@ -2501,7 +2550,8 @@ static void parse_for_num(LexState *ls, GCstr *varname, BCLine line)
     bcreg_reserve(fs, 1);
   }
   var_add(ls, 3);  /* Hidden control variables. */
-  lex_check(ls, TK_do);
+  if (ls->tok == TK_do)  /* Optional 'do'. */
+    lj_lex_next(ls);  /* Skip 'do'. */
   loop = bcemit_AJ(fs, BC_FORI, base, NO_JMP);
   fscope_begin(fs, &bl, 0);  /* Scope for visible variables. */
   var_add(ls, 1);
@@ -2567,14 +2617,16 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
   var_new(ls, nvars++, indexname);
   while (lex_opt(ls, ','))
     var_new(ls, nvars++, lex_str(ls));
-  lex_check(ls, TK_in);
+  if (ls->tok == TK_in)  /* Optional 'do'. */
+    lj_lex_next(ls);  /* Skip 'do'. */
   line = ls->linenumber;
   assign_adjust(ls, 3, expr_list(ls, &e), &e);
   /* The iterator needs another 3 [4] slots (func [pc] | state ctl). */
   bcreg_bump(fs, 3+ls->fr2);
   isnext = (nvars <= 5 && fs->pc > exprpc && predict_next(ls, fs, exprpc));
   var_add(ls, 3);  /* Hidden control variables. */
-  lex_check(ls, TK_do);
+  if (ls->tok == TK_do)  /* Optional 'do'. */
+    lj_lex_next(ls);  /* Skip 'do'. */
   loop = bcemit_AJ(fs, isnext ? BC_ISNEXT : BC_JMP, base, NO_JMP);
   fscope_begin(fs, &bl, 0);  /* Scope for visible variables. */
   var_add(ls, nvars-3);
@@ -2609,15 +2661,16 @@ static void parse_for(LexState *ls, BCLine line)
   fscope_end(fs);  /* Resolve break list. */
 }
 
-/* Parse condition and 'then' block. */
+/* Parse condition and optional 'then' block. */
 static BCPos parse_then(LexState *ls)
 {
-  BCPos condexit;
-  lj_lex_next(ls);  /* Skip 'if' or 'elseif'. */
-  condexit = expr_cond(ls);
-  lex_check(ls, TK_then);
-  parse_block(ls);
-  return condexit;
+    BCPos condexit;
+    lj_lex_next(ls);  /* Skip 'if' or 'elseif'. */
+    condexit = expr_cond(ls);
+    if (ls->tok == TK_then)  /* Optional 'then'. */
+        lj_lex_next(ls);  /* Skip 'then'. */
+    parse_block(ls);  /* Parse the block directly. */
+    return condexit;
 }
 
 /* Parse 'if' statement. */
