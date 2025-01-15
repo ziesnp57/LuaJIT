@@ -64,7 +64,7 @@ echo "########## Running make ##########"
 make HOST_CC="gcc -m64" CROSS="$NDKP" \
      STATIC_CC="$NDKCC" DYNAMIC_CC="$NDKCC -fPIC" \
      TARGET_LD="$NDKCC" TARGET_AR="$NDKB/llvm-ar rcus" TARGET_STRIP="$NDKB/llvm-strip" \
-     CFLAGS="-fPIC" TARGET_FLAGS="$NDKARCH" TARGET_SYS=Android \
+     CFLAGS="-fPIC" TARGET_FLAGS="$NDKARCH" \
      clean amalg
 
 # 移动结果文件到目标目录
